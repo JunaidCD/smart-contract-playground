@@ -7,7 +7,10 @@ describe("TimeLockedVault", function () {
 
   beforeEach(async function () {
     [owner, addr1] = await ethers.getSigners();
-    unlockTime = Math.floor(Date.now() / 1000) + 60; // 1 minute in future
+    
+    // Get current block timestamp and add 60 seconds
+    const currentBlock = await ethers.provider.getBlock('latest');
+    unlockTime = currentBlock.timestamp + 60;
 
     Vault = await ethers.getContractFactory("TimeLockedVault");
     vault = await Vault.deploy(unlockTime);
@@ -22,7 +25,7 @@ describe("TimeLockedVault", function () {
 
   it("Should prevent early withdrawal", async function () {
     await vault.connect(addr1).deposit({ value: ethers.parseEther("1") });
-    await expect(vault.withdraw()).to.be.revertedWith("Vault is still locked");
+    await expect(vault.connect(owner).withdraw()).to.be.revertedWith("Vault is still locked");
   });
 
   it("Should allow withdrawal after unlockTime", async function () {
@@ -34,7 +37,7 @@ describe("TimeLockedVault", function () {
 
     const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
 
-    const tx = await vault.withdraw();
+    const tx = await vault.connect(owner).withdraw();
     const receipt = await tx.wait();
     const gasUsed = receipt.gasUsed * receipt.gasPrice;
 
