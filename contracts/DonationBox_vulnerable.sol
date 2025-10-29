@@ -2,35 +2,42 @@
 pragma solidity ^0.8.20;
 
 /// @title DonationBox_vulnerable
-/// @notice intentionally vulnerable withdraw() — sends before updating state (reentrancy)
+/// @notice Intentionally vulnerable withdraw(): sends Ether BEFORE updating state
 contract DonationBox_vulnerable {
-    mapping(address => uint256) public donations;
+    mapping(address => uint256) public balances;
 
-    event Donated(address indexed from, uint256 amount);
-    event Withdrawn(address indexed to, uint256 amount);
+    event Deposit(address indexed from, uint256 amount);
+    event Withdraw(address indexed to, uint256 amount);
 
-    function donate() external payable {
-        require(msg.value > 0, "no ether");
-        donations[msg.sender] += msg.value;
-        emit Donated(msg.sender, msg.value);
+    /// @notice deposit Ether into the sender's balance
+    function deposit() external payable {
+        require(msg.value > 0, "Send some Ether");
+        balances[msg.sender] += msg.value;
+        emit Deposit(msg.sender, msg.value);
     }
 
-    /// Vulnerable: external call occurs before state update
+    /// @notice vulnerable withdraw: interaction (external call) happens BEFORE state update
     function withdraw() external {
-        require(donations[msg.sender] > 0, "no funds");
-        uint256 amount = donations[msg.sender];
+        uint256 bal = balances[msg.sender];
+        require(bal > 0, "No balance");
 
-        // VULNERABLE: interaction happens before effect
-        (bool ok, ) = payable(msg.sender).call{value: amount}("");
-        require(ok, "send failed");
+        // === VULNERABLE PATTERN: external call before updating internal state ===
+        (bool success, ) = payable(msg.sender).call{value: bal}("");
+        require(success, "Transfer failed");
 
-        // bug: state not updated correctly (should be donations[msg.sender] = 0)
-        donations[msg.sender] = donations[msg.sender]; // intentional no-op to show vulnerability
-        emit Withdrawn(msg.sender, amount);
+        // state update happens after external call -> reentrancy possible
+        balances[msg.sender] = 0;
+
+        emit Withdraw(msg.sender, bal);
     }
 
-    // helper to read contract balance
-    function totalBalance() external view returns (uint256) {
+    // Helper to check contract balance
+    function contractBalance() external view returns (uint256) {
         return address(this).balance;
+    }
+
+    // Fund the contract directly (owner/funders can send Ether to donate pool)
+    receive() external payable {
+        // optionally accept donations to the pool (not credited to sender balances)
     }
 }
