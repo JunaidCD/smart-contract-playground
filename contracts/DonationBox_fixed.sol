@@ -2,35 +2,43 @@
 pragma solidity ^0.8.20;
 
 /// @title DonationBox_fixed
-/// @notice CEI-safe withdraw (state updated before external call)
+/// @notice CEI (Checks → Effects → Interactions) + totalBalances tracking for invariant testing
 contract DonationBox_fixed {
-    mapping(address => uint256) public donations;
+    mapping(address => uint256) public balances;
+    uint256 public totalBalances; // tracked sum of all balances
 
-    event Donated(address indexed from, uint256 amount);
-    event Withdrawn(address indexed to, uint256 amount);
+    event Deposit(address indexed from, uint256 amount);
+    event Withdraw(address indexed to, uint256 amount);
 
-    function donate() external payable {
-        require(msg.value > 0, "no ether");
-        donations[msg.sender] += msg.value;
-        emit Donated(msg.sender, msg.value);
+    /// @notice deposit Ether into the sender's balance
+    function deposit() external payable {
+        require(msg.value > 0, "Send some Ether");
+        balances[msg.sender] += msg.value;
+        totalBalances += msg.value;
+        emit Deposit(msg.sender, msg.value);
     }
 
-    /// Safe withdraw: update state before external call (CEI)
+    /// @notice safe withdraw following Checks -> Effects -> Interactions
     function withdraw() external {
-        uint256 amt = donations[msg.sender];
-        require(amt > 0, "no funds");
+        uint256 bal = balances[msg.sender];
+        require(bal > 0, "No balance");
 
-        // EFFECT first
-        donations[msg.sender] = 0;
+        // ---- EFFECTS first ----
+        balances[msg.sender] = 0;
+        totalBalances -= bal;
 
-        // INTERACTION
-        (bool ok, ) = payable(msg.sender).call{value: amt}("");
-        require(ok, "send failed");
+        // ---- INTERACTIONS after ----
+        (bool success, ) = payable(msg.sender).call{value: bal}("");
+        require(success, "Transfer failed");
 
-        emit Withdrawn(msg.sender, amt);
+        emit Withdraw(msg.sender, bal);
     }
 
-    function totalBalance() external view returns (uint256) {
+    // Allow direct funding (donations to pool) that are NOT credited to balances
+    receive() external payable {}
+
+    /// @notice helper to read contract balance (for tests/invariants)
+    function contractBalance() external view returns (uint256) {
         return address(this).balance;
     }
 }
