@@ -10,9 +10,9 @@ describe("DonationBox reentrancy demo", function () {
     const donationBox = await DonationBox.deploy();
     await donationBox.waitForDeployment();
 
-    // Donate/fund the contract from donor and deployer (not credited to attacker)
-    await deployer.sendTransaction({ to: await donationBox.getAddress(), value: ethers.parseEther("5.0") });
-    await donor.sendTransaction({ to: await donationBox.getAddress(), value: ethers.parseEther("3.0") });
+    // Fund the contract with credited deposits (so they can be withdrawn)
+    await donationBox.connect(deployer).deposit({ value: ethers.parseEther("5.0") });
+    await donationBox.connect(donor).deposit({ value: ethers.parseEther("3.0") });
 
     // Attacker deploys Attacker contract
     const Attacker = await ethers.getContractFactory("Attacker", attackerEOA);
@@ -20,8 +20,8 @@ describe("DonationBox reentrancy demo", function () {
     await attacker.waitForDeployment();
 
     // Call attack() with a deposit amount (attacker.contract will call deposit on target)
-    // This will deposit 0.2 ETH into the DonationBox and then try to withdraw and reenter
-    await attacker.connect(attackerEOA).attack({ value: ethers.parseEther("0.2") });
+    // This will deposit 1.0 ETH into the DonationBox and then try to withdraw and reenter
+    await attacker.connect(attackerEOA).attack({ value: ethers.parseEther("1.0") });
 
     // Check results: donationBox should be drained (approx 0)
     const finalTargetBal = await ethers.provider.getBalance(await donationBox.getAddress());

