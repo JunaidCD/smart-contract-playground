@@ -2,48 +2,42 @@
 pragma solidity ^0.8.20;
 
 contract TimeLockedVault {
-    address public owner;
-    uint public unlockTime;
 
-    // Pull-payment style balance
-    uint private ownerBalance;
-
-    // Events
-    event Deposited(address indexed from, uint amount);
-    event Withdrawn(address indexed to, uint amount);
-
-    // Set owner and unlock time in constructor
-    constructor(uint _unlockTime) {
-        require(_unlockTime > block.timestamp, "Unlock time must be in the future");
-        owner = msg.sender;
-        unlockTime = _unlockTime;
+    struct Deposit {
+        uint256 amount;
+        uint256 unlockTime;
     }
 
-    // Anyone can deposit Ether for the owner
-    function deposit() external payable {
-        require(msg.value > 0, "Must send some Ether");
-        ownerBalance += msg.value; // update state first
-        emit Deposited(msg.sender, msg.value);
+    mapping(address => Deposit) public deposits;
+
+    event Deposited(address indexed user, uint256 amount, uint256 unlockTime);
+    event Withdrawn(address indexed user, uint256 amount);
+
+    function deposit(uint256 lockDuration) external payable {
+
+        require(msg.value > 0, "No ETH sent");
+
+        deposits[msg.sender] = Deposit({
+            amount: msg.value,
+            unlockTime: block.timestamp + lockDuration
+        });
+
+        emit Deposited(msg.sender, msg.value, block.timestamp + lockDuration);
     }
 
-    // Owner can withdraw only after unlockTime
     function withdraw() external {
-        require(msg.sender == owner, "Only owner can withdraw");
-        require(block.timestamp >= unlockTime, "Vault is still locked");
-        uint amount = ownerBalance;
-        require(amount > 0, "No funds to withdraw");
 
-        // CEI pattern: update state before interaction
-        ownerBalance = 0;
+        Deposit storage userDeposit = deposits[msg.sender];
 
-        (bool sent, ) = owner.call{value: amount}("");
-        require(sent, "Failed to send Ether");
+        require(userDeposit.amount > 0, "No deposit");
+        require(block.timestamp >= userDeposit.unlockTime, "Funds locked");
 
-        emit Withdrawn(owner, amount);
-    }
+        uint256 amount = userDeposit.amount;
 
-    // Helper function to check balance
-    function getBalance() external view returns (uint) {
-        return ownerBalance;
+        userDeposit.amount = 0;
+
+        payable(msg.sender).transfer(amount);
+
+        emit Withdrawn(msg.sender, amount);
     }
 }
